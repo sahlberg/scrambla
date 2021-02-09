@@ -1,0 +1,26 @@
+#!/usr/bin/env python
+# coding: utf-8
+
+class Config(object):
+    """
+    A singleton class for the config
+    """
+
+    instance = None
+    shares = {'Share': '/data/sahlberg/pysmb3d'}
+    server_name = 'Python-NAS'
+    domain_name = 'WORKGROUP'
+    
+    class __Config:
+        def __init__(self, arg):
+            self.val = arg
+        def __str__(self):
+            return repr(self) + self.val
+    def __init__(self, arg):
+        if not Config.instance:
+            Config.instance = Config.__Config(arg)
+        else:
+            Config.instance.val = arg
+    def __getattr__(self, name):
+        return getattr(self.instance, name)
+    
