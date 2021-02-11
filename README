@@ -1,15 +1,20 @@
+Licence:
+========
+This project is LGPLv2.1 or later
+
 scrambla is a smb2/3 server written in python.
 It is limited in scope but is complete enough to be useful for error injection
 and testing clients.
 
 The biggest missing features at this point is
+* It does not fork a connection and only accests a single client connection.
+  Once the client disconnects the server will terminate.
+  
 * It is read-only
 * it does not verify the ntlmssp auth packet and simply allows everyone in as
   guest.
 * is does not track uids/gids of the client and all i/o will be performed as
   root.
-* It does not fork a connection and only accests a single client connection.
-  Once the client disconnects the server will terminate.
 
 That said, it is complete enough to mount -o ro from a linux client,
 list directories, stat files and read files.
@@ -30,3 +35,4 @@ smb2/ : This directory contains the mappings between bytearrays and dicts
 server/ : This directory contains the code to run a simple server.
 tests/  : Test-suite to validate the marshalling/unmarshalling of the
           smb2/ code.
+
