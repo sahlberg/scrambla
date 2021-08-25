@@ -443,7 +443,6 @@ class Server(object):
                         }))
         
     def srv_sess_setup(self, hdr, pdu):
-        print('Sess setup')
         try:
             sm = self._sp.step(pdu['security_buffer'])
         except Exception as e:
@@ -460,8 +459,13 @@ class Server(object):
             else:
                 print('Exception', e)
                 raise
-        
+
         if not sm:
+            # self._sp.complete
+            # self._sp.session_key
+            # self._sp.negotiated_protocol == 'ntlm'
+            print('Authenticated as', self._sp.client_principal)
+
             #
             # TODO store user/session data in this tuple
             hdr['session_id'] = self._sesid
