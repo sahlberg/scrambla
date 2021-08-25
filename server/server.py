@@ -8,7 +8,11 @@ import stat
 import struct
 import time
 
-from config import Config
+try:
+    from config import Config
+except:
+    print('FATAL: No configuration file found.')
+    raise
 from smb2.header import *
 from smb2.error_response import *
 from smb2.negotiate_protocol import *

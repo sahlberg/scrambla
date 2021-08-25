@@ -21,6 +21,10 @@ list directories, stat files and read files.
 
 Add more text once the server gains more features.
 
+Configuration
+=============
+Configuration is done in server/config.py.
+See server/config.py.example for an example configuration file.
 
 To run it
 =========
