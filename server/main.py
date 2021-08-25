@@ -25,7 +25,8 @@ def main():
             with conn:
                 try:
                     Server(conn)
-                except:
+                except Exception as e:
+                    print(e)
                     True
             
 if __name__ == "__main__":
