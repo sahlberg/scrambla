@@ -23,7 +23,10 @@ def main():
             print('Waiting for connection')
             conn, addr = s.accept()
             with conn:
-                Server(conn)
+                try:
+                    Server(conn)
+                except:
+                    True
             
 if __name__ == "__main__":
     main()

@@ -7,12 +7,16 @@ import socket
 import stat
 import struct
 import time
+import spnego
 
 try:
     from config import Config
 except:
     print('FATAL: No configuration file found.')
     raise
+if Config.ntlm_user_file:
+    os.environ['NTLM_USER_FILE'] = Config.ntlm_user_file 
+
 from smb2.header import *
 from smb2.error_response import *
 from smb2.negotiate_protocol import *
@@ -28,7 +32,6 @@ from smb2.query_directory import *
 from smb2.file_info import *
 from smb2.filesystem_info import *
 from smb2.dir_info import *
-from smb2.ntlmssp import *
 
 class File(object):
 
@@ -86,6 +89,7 @@ class Server(object):
     
     def __init__(self, s, **kwargs):
         self._s = s
+        self._sp = spnego.server(socket.gethostname())
         self._sesid = 1
         self._treeid = 1
         self._fileid = 1
@@ -438,54 +442,25 @@ class Server(object):
                         }))
         
     def srv_sess_setup(self, hdr, pdu):
-        #
-        # Just let everyone in as GUEST
-        #
-        # TODO store user/session data in this tuple
-        hdr['session_id'] = self._sesid
-        self.sessions.update({self._sesid: (None,)})
-        self._sesid = self._sesid + 1
+        sm = self._sp.step(pdu['security_buffer'])
 
-        if 'security_buffer' not in pdu:
+        if not sm:
+            #
+            # TODO store user/session data in this tuple
+            hdr['session_id'] = self._sesid
+            self.sessions.update({self._sesid: (None,)})
+            self._sesid = self._sesid + 1
+        
             return (Status.SUCCESS,
-                    SessionSetup.encode(Direction.REPLY,
-                            {'session_flags': SMB2_SESSION_FLAG_IS_NULL,
-                             }))
-
-        _nt = NTLMSSP().decode(pdu['security_buffer'])
-        if _nt['message_type'] == NTLM_AUTHENTICATE:
-            # let them in as guest without even checking the creds
-            return (Status.SUCCESS,
-                    SessionSetup.encode(Direction.REPLY,
-                        {'session_flags': SMB2_SESSION_FLAG_IS_GUEST,
-                        }))
-
-        if _nt['message_type'] == NTLM_NEGOTIATE:
-            _ntr = NTLMSSP().encode({
-                'message_type': NTLM_CHALLENGE,
-                'target_name': Config.server_name,
-                'negotiate_flags': NEGOTIATE_FLAG_U | NEGOTIATE_FLAG_T| NEGOTIATE_FLAG_S | NEGOTIATE_FLAG_P | NEGOTIATE_FLAG_O | NEGOTIATE_FLAG_E | NEGOTIATE_FLAG_C | NEGOTIATE_FLAG_A,
-                # random number to store in _self.
-                'server_challenge': bytearray(8),
-                'target_info': {
-                    'dns_computer_name': Config.server_name,
-                    'dns_domain_name': Config.domain_name,
-                    'target_name': Config.server_name
-                    },
-                'product_major_version': 10,
-                'product_minor_version': 0,
-                'product_build': 10,
-                'ntlm_revision_current': 15
-                })
-            
-            return (Status.MORE_PROCESSING_REQUIRED,
                     SessionSetup.encode(Direction.REPLY,
                         {'session_flags': 0,
-                         'security_buffer': _ntr,
                          }))
-        
-        return (Status.INVALID_PARAMETER,
-                ErrorResponse.encode({'error_data' : bytes(1)}))
+            
+        return (Status.MORE_PROCESSING_REQUIRED,
+                SessionSetup.encode(Direction.REPLY,
+                                    {'session_flags': 0,
+                                     'security_buffer': sm,
+                                     }))
         
     def srv_sess_logoff(self, hdr, pdu):
         del self.sessions[hdr['session_id']]

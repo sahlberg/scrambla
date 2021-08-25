@@ -26,6 +26,12 @@ Configuration
 Configuration is done in server/config.py.
 See server/config.py.example for an example configuration file.
 
+Authentication
+==============
+Authentication requires that you have the pyspnego pip package installed:
+sudo pip install pyspnego
+You also need to setup a NTLM_USER_FILE and point to it from the config.
+
 To run it
 =========
 sudo PYTHONPATH=`pwd` python ./server/main.py
