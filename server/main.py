@@ -19,9 +19,11 @@ def main():
         # process to manage the connection.
         # Having one one process for each connected client.
         s.listen()
-        conn, addr = s.accept()
-        with conn:
-            Server(conn)
+        while True:
+            print('Waiting for connection')
+            conn, addr = s.accept()
+            with conn:
+                Server(conn)
             
 if __name__ == "__main__":
     main()

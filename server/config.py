@@ -7,7 +7,7 @@ class Config(object):
     """
 
     instance = None
-    shares = {'Share': '/data/sahlberg/pysmb3d'}
+    shares = {'Share': '/data/scrambla'}
     server_name = 'Python-NAS'
     domain_name = 'WORKGROUP'
     
