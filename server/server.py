@@ -90,6 +90,7 @@ class Server(object):
     def __init__(self, s, **kwargs):
         self._s = s
         self._sp = spnego.server(socket.gethostname())
+        self._guest = False
         self._sesid = 1
         self._treeid = 1
         self._fileid = 1
@@ -442,8 +443,24 @@ class Server(object):
                         }))
         
     def srv_sess_setup(self, hdr, pdu):
-        sm = self._sp.step(pdu['security_buffer'])
-
+        print('Sess setup')
+        try:
+            sm = self._sp.step(pdu['security_buffer'])
+        except Exception as e:
+            if Config.guest_login:
+                print('Authentication failed. Logging in as guest')
+                self._guest = True
+                hdr['session_id'] = self._sesid
+                self.sessions.update({self._sesid: (None,)})
+                self._sesid = self._sesid + 1
+                return (Status.SUCCESS,
+                        SessionSetup.encode(Direction.REPLY,
+                                {'session_flags': SMB2_SESSION_FLAG_IS_GUEST,
+                                 }))
+            else:
+                print('Exception', e)
+                raise
+        
         if not sm:
             #
             # TODO store user/session data in this tuple
