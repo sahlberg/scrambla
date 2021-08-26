@@ -1,6 +1,10 @@
 #!/usr/bin/env python
 # coding: utf-8
 
+from Crypto.Hash import CMAC
+from Crypto.Cipher import AES
+import hashlib
+import hmac
 import os
 import secrets
 import socket
@@ -8,7 +12,6 @@ import stat
 import struct
 import time
 import spnego
-
 try:
     from config import Config
 except:
@@ -32,6 +35,8 @@ from smb2.query_directory import *
 from smb2.file_info import *
 from smb2.filesystem_info import *
 from smb2.dir_info import *
+
+SMB2_KEY_SIZE = 16
 
 class File(object):
 
@@ -95,6 +100,8 @@ class Server(object):
         self._treeid = 1
         self._fileid = 1
         self._last_fid = (0, 0)
+        self.signing_key = None
+        self._use_signing = False
 
         print('Socket', self._s)
         self.Run()
@@ -442,6 +449,35 @@ class Server(object):
                         'maximal_access': 0x001f00a9,
                         }))
         
+    def generate_keys(self, session_key):
+        def derive_key(session_key, label, context):
+            input_key = session_key[:16]
+
+            hm = hmac.new(input_key, None, hashlib.sha256)
+            counter=bytearray(4)
+            struct.pack_into('>I', counter, 0, 1)
+            hm.update(counter)
+            hm.update(label)
+            hm.update(bytes(1))
+            hm.update(context)
+            keylen=bytearray(4)
+            struct.pack_into('>I', keylen, 0, SMB2_KEY_SIZE * 8)
+            hm.update(keylen)
+            return hm.digest()
+
+        if self.dialect <= VERSION_0210:
+            self.signing_key = session_key
+        elif self.dialect <= VERSION_0302:
+            self.signing_key = derive_key(session_key,
+                    bytes('SMB2AESCMAC', encoding='ascii') + bytes(1),
+                    bytes('SmbSign', encoding='ascii') + bytes(1),
+                    )[:SMB2_KEY_SIZE]
+        else: # dialect >= VERSION_0311
+            self.signing_key = derive_key(session_key,
+                    bytes('SMBSigningKey', encoding='ascii') + bytes(1),
+                    self.preauth_hash,
+                    )[:SMB2_KEY_SIZE]
+
     def srv_sess_setup(self, hdr, pdu):
         try:
             sm = self._sp.step(pdu['security_buffer'])
@@ -460,12 +496,11 @@ class Server(object):
                 print('Exception', e)
                 raise
 
-        if not sm:
-            # self._sp.complete
+        if self._sp.complete:
             # self._sp.session_key
             # self._sp.negotiated_protocol == 'ntlm'
             print('Authenticated as', self._sp.client_principal)
-
+            self.generate_keys(self._sp.session_key)
             #
             # TODO store user/session data in this tuple
             hdr['session_id'] = self._sesid
@@ -489,6 +524,18 @@ class Server(object):
                 TreeDisconnect.encode(Direction.REPLY, {}))
         
     def srv_neg_prot(self, hdr, pdu):
+        if Config.signing_required:
+            if pdu['security_mode'] & SMB2_NEGOTIATE_SIGNING_ENABLED == 0:
+                print('Signing required but client does not offer signing')
+                raise ValueError
+        if Config.signing_enabled:
+            if pdu['security_mode'] & SMB2_NEGOTIATE_SIGNING_ENABLED != 0:
+                self._use_signing = True
+        else:
+            if pdu['security_mode'] & SMB2_NEGOTIATE_SIGNING_REQUIRED != 0:
+                print('Signing disabled but client requires it')
+                raise ValueError
+
         # Only allow version 3.02
         if not VERSION_0302 in pdu['dialects']:
             print('No supported dialect in Negotiate Protocol')
@@ -497,14 +544,35 @@ class Server(object):
         self.dialect = VERSION_0302
         return (Status.SUCCESS,
                 NegotiateProtocol.encode(Direction.REPLY,
-                       {'security_mode': 0,
+                       {'security_mode': SMB2_NEGOTIATE_SIGNING_ENABLED,
                         'dialect_revision': self.dialect,
                         'capabilities': 0,
                         'max_transact_size': 65536,
                         'max_read_size': 65536,
                         'max_write_size': 65536,
                         'system_time': (int(time.time()), 0, 0)}))
-        
+
+    def VerifySignature(self, hdr, cmd):
+        if self.dialect == VERSION_0202:
+            print('Can not compute signature for 2.02 yet')
+            raise ValueError
+        else:
+            mac = cmd[48:64]
+            zsc = cmd[:48] + bytes(16) + cmd[64:]
+            co = CMAC.new(self.signing_key, ciphermod=AES)
+            co.update(zsc)
+            co.verify(mac)
+
+    def ComputeSignature(self, buf):
+        if self.dialect == VERSION_0202:
+            print('Can not compute signature for 2.02 yet')
+            raise ValueError
+        else:
+            co = CMAC.new(self.signing_key, ciphermod=AES)
+            co.update(buf)
+            d = co.digest()
+            return d
+
     def ProcessCommands(self, cmds):
         r = []
         self._compound_error = Status.SUCCESS
@@ -513,6 +581,8 @@ class Server(object):
             # Decode the command pdu
             #
             h = cmd[0]
+            if h['flags'] & SIGNED:
+                self.VerifySignature(cmd[0], cmd[1])
             ct = {
                 Command.NEGOTIATE_PROTOCOL: (NegotiateProtocol, self.srv_neg_prot),
                 Command.SESSION_SETUP: (SessionSetup, self.srv_sess_setup),
@@ -526,24 +596,34 @@ class Server(object):
                 Command.QUERY_DIRECTORY: (QueryDirectory, self.srv_query_dir),
                 }
 
+            f = RESPONSE
+            f = f | (h['flags'] & RELATED)
+            _sign = self._use_signing
+            if h['command'] == Command.NEGOTIATE_PROTOCOL.value:
+                _sign = False
+            if h['command'] == Command.SESSION_SETUP.value:
+                _sign = False
+            if _sign:
+                f = f | SIGNED
+
             if self._compound_error != Status.SUCCESS:
                 rh = Header.encode({'protocol_id': SMB2_MAGIC,
                                     'credit_charge': h['credit_charge'],
                                     'status': self._compound_error.value,
                                     'command': h['command'],
                                     'credit_response': h['credit_request'],
-                                    'flags': RESPONSE,
+                                    'flags': f,
                                     'message_id': h['message_id'],
                                     'process_id': h['process_id'],
                                     'tree_id': h['tree_id'],
                                     'session_id': h['session_id']})
                 r.append((rh,
-                          ErrorResponse.encode({'error_data' : bytes(1)})))
+                    ErrorResponse.encode({'error_data' : bytes(1)})))
                 continue
 
             try:
                 c = ct.get(Command(h['command']))
-                req = c[0].decode(Direction.REQUEST, cmd[1])
+                req = c[0].decode(Direction.REQUEST, cmd[1][64:])
             except:
                 print('Can not handle command', h['command'], 'yet.')
                 rh = Header.encode({'protocol_id': SMB2_MAGIC,
@@ -551,7 +631,7 @@ class Server(object):
                                     'status': Status.INVALID_PARAMETER.value,
                                     'command': h['command'],
                                     'credit_response': h['credit_request'],
-                                    'flags': RESPONSE,
+                                    'flags': f,
                                     'message_id': h['message_id'],
                                     'process_id': h['process_id'],
                                     'tree_id': h['tree_id'],
@@ -562,13 +642,15 @@ class Server(object):
 
             rep = c[1](h, req)
 
-            _f = RESPONSE | (h['flags'] & RELATED)
+            if h['command'] == Command.SESSION_SETUP.value and self._use_signing and rep[0].value == 0:
+                f = f | SIGNED
+
             rh = Header.encode({'protocol_id': SMB2_MAGIC,
                                 'credit_charge': h['credit_charge'],
                                 'status': rep[0].value,
                                 'command': h['command'],
                                 'credit_response': h['credit_request'],
-                                'flags': _f,
+                                'flags': f,
                                 'message_id': h['message_id'],
                                 'process_id': h['process_id'],
                                 'tree_id': h['tree_id'],
@@ -587,10 +669,10 @@ class Server(object):
                 print('Not a SMB2 header')
                 raise ValueError
             if _h['next_command']:
-                cmds.append((_h, buf[64:_h['next_command']]))
+                cmds.append((_h, buf[:_h['next_command']]))
                 buf = buf[_h['next_command']:]
             else:
-                cmds.append((_h, buf[64:]))
+                cmds.append((_h, buf[:]))
                 buf = []
         return cmds
 
@@ -633,18 +715,22 @@ class Server(object):
             buf = bytearray(0)
             _pos = 0
             _last_pos = 0
-            for r in rep:
+            _num = len(rep)
+            for idx, r in enumerate(rep):
                 buf = buf + r[0] + r[1]
                 _len = len(buf)
                 if _len % 8:
                     _pad = ((_len + 7) & 0xfff8) - _len
                     buf = buf + bytearray(_pad)
 
-                struct.pack_into('<I', buf, _pos + 20, len(buf) - _pos)
+                if idx + 1 != _num:
+                    struct.pack_into('<I', buf, _pos + 20, len(buf) - _pos)
+                if buf[_pos + 16] & SIGNED:
+                    buf[_pos + 48:_pos + 64] = self.ComputeSignature(buf[_pos:])
+
                 _last_pos = _pos
                 _pos = len(buf)
 
-            struct.pack_into('<I', buf, _last_pos + 20, 0)
             spl = bytearray(4)
             struct.pack_into('>I', spl, 0, len(buf))
             while len(spl):

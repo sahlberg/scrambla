@@ -10,6 +10,8 @@ class Config(object):
     shares = {'Share': '/data/scrambla'}
     ntlm_user_file = '/path/to/NTLM_USER_FILE'
     guest_login = True
+    signing_enabled = True
+    signing_required = False
     server_name = 'Python-NAS'
     domain_name = 'WORKGROUP'
     
