@@ -483,7 +483,11 @@ class Server(object):
             sm = self._sp.step(pdu['security_buffer'])
         except Exception as e:
             if Config.guest_login:
+                if Config.signing_required:
+                    print('Authentication failed. Guest login unavailable when signing is required')
+                    raise e
                 print('Authentication failed. Logging in as guest')
+                self._use_signing = False
                 self._guest = True
                 hdr['session_id'] = self._sesid
                 self.sessions.update({self._sesid: (None,)})
