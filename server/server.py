@@ -45,13 +45,16 @@ class File(object):
         self.fd = os.open(self.path, flags, dir_fd=at)
         _st = os.stat(self.fd)
         self.de = []
+        self.delete_on_close = False
         if stat.S_ISDIR(_st.st_mode):
             self.scandir()
 
     def __del__(self):
         if self.fd:
             os.close(self.fd)
-
+            if self.delete_on_close:
+                os.unlink(self.path)
+    
     def stat(self):
         return os.fstat(self.fd)
 
@@ -387,6 +390,8 @@ class Server(object):
             return (self._compound_error,
                     ErrorResponse.encode({'error_data' : bytes(1)}))
 
+        if pdu['create_options'] & FILE_DELETE_ON_CLOSE:
+            f.delete_on_close = True
         self._last_fid = (self._fileid, self._fileid)
         self._fileid = self._fileid + 1
         self.files.update({self._last_fid: f})
