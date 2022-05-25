@@ -214,6 +214,7 @@ def _decode_request(hdr):
 
     _offset = struct.unpack_from('<I', hdr, 48)[0] - 64
     _len = struct.unpack_from('<I', hdr, 52)[0]
+    result.update({'contexts': {}})
     if _offset:
         result.update({'contexts': _decode_contexts(hdr[_offset:_offset + _len], request_contexts)})
 
@@ -301,6 +302,7 @@ def _decode_reply(hdr):
 
     _offset = struct.unpack_from('<I', hdr, 80)[0] - 64
     _len = struct.unpack_from('<I', hdr, 84)[0]
+    result.update({'contexts': {}})
     if _offset:
         result.update({'contexts': _decode_reply_contexts(hdr[_offset:_offset + _len], reply_contexts)})
 
@@ -335,7 +337,9 @@ def _encode_contexts(contexts, ctx_list):
     _pos = 0
     buf = bytearray(0)
 
-    for context in contexts.values():
+    for name, context in contexts.items():
+        context['name'] = name
+        
         _pos = len(buf)
         buf = buf + _encode_context(context, ctx_list)
 

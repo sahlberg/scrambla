@@ -399,7 +399,15 @@ class Server(object):
         _a = FILE_ATTRIBUTE_SPARSE_FILE
         if stat.S_ISDIR(_st.st_mode):
             _a = _a | FILE_ATTRIBUTE_DIRECTORY
-            
+
+        contexts = {}
+        for ctx in pdu['contexts']:
+            if ctx == 'QFid':
+                contexts.update({'QFid': {'disk_file_id': _st.st_ino,
+                                          'volume_id': _st.st_dev}})
+            else:
+                print('Can not handle Create context', ctx, 'yet')
+
         return (Status.SUCCESS,
                 Create.encode(Direction.REPLY,
                        {'oplock_level': Oplock.LEVEL_NONE.value,
@@ -413,6 +421,7 @@ class Server(object):
                         'end_of_file': _st.st_size,
                         'file_attributes': _a,
                         'file_id': self._last_fid,
+                        'contexts': contexts,
                         }))
 
     def srv_tree_disconn(self, hdr, pdu):
