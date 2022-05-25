@@ -430,7 +430,7 @@ class Server(object):
                 ErrorResponse.encode({'error_data' : bytes(1)}))
 
 
-    def _set_file_info(self, t, pdu):
+    def _set_file_info(self, f, t, pdu):
         c = pdu['file_info_class']
         try:
             _ = FileInfoClass(c)
@@ -441,7 +441,7 @@ class Server(object):
 
         buffer = FileInfo.decode(FileInfoClass(c), pdu['buffer'])
         if FileInfoClass(c) == FileInfoClass.END_OF_FILE_INFORMATION:
-            os.truncate(t.fd, buffer['end_of_file'])
+            os.truncate(f.fd, buffer['end_of_file'])
             return (Status.SUCCESS,
                     SetInfo.encode(Direction.REPLY,
                                      {}))
@@ -449,7 +449,12 @@ class Server(object):
             a = (buffer['last_access_time'][0], buffer['last_write_time'][0])
             if a[0] == 0:
                 a = (int(time.time()), a[1])
-            os.utime(t.fd, times=a)
+            os.utime(f.fd, times=a)
+            return (Status.SUCCESS,
+                    SetInfo.encode(Direction.REPLY,
+                                     {}))
+        if FileInfoClass(c) == FileInfoClass.RENAME_INFORMATION:
+            os.rename(f.path, buffer['filename'], src_dir_fd=t[0], dst_dir_fd=t[0])
             return (Status.SUCCESS,
                     SetInfo.encode(Direction.REPLY,
                                      {}))
@@ -466,6 +471,7 @@ class Server(object):
             self._compound_error = Status.INVALID_PARAMETER
             return (self._compound_error,
                     ErrorResponse.encode({'error_data' : bytes(1)}))
+        t = self.trees[hdr['tree_id']]
 
         _fid = pdu['file_id']
         if _fid == (0xffffffffffffffff, 0xffffffffffffffff):
@@ -479,7 +485,7 @@ class Server(object):
                     ErrorResponse.encode({'error_data' : bytes(1)}))
 
         if pdu['info_type'] == SMB2_0_INFO_FILE:
-            return self._set_file_info(_f, pdu)
+            return self._set_file_info(_f, t, pdu)
         
         print('SetInfo: Can not handle info type', pdu['info_type'])
         self._compound_error = Status.INVALID_PARAMETER

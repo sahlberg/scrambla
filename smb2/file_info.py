@@ -24,6 +24,7 @@ class FileInfoClass(Enum):
     EA_INFORMATION                = 0x07
     ACCESS_INFORMATION            = 0x08
     NAME_INFORMATION              = 0x09
+    RENAME_INFORMATION            = 0x0a
     POSITION_INFORMATION          = 0x0e
     MODE_INFORMATION              = 0x10
     ALIGNMENT_INFORMATION         = 0x11
@@ -95,6 +96,21 @@ def decode_access_info(buf):
 def encode_access_info(info):
     buf = bytearray(4)
     struct.pack_into('<I', buf, 0, info['access_flags'])
+    return buf
+
+def decode_rename_info(buf):
+    info = {}
+    info.update({'replace_if_exists': struct.unpack_from('<B', buf, 0)[0]})
+    _len = struct.unpack_from('<I', buf, 16)[0]
+    info.update({'filename': UCS2toUTF8(buf[20:20 + _len])})
+    return info
+
+def encode_rename_info(info):
+    buf = bytearray(20)
+    struct.pack_into('<B', buf, 0, info['replace_if_exists'])
+    _fn = UTF8toUCS2(info['filename'])
+    struct.pack_into('<I', buf, 16, len(_fn))
+    buf = buf + _fn
     return buf
 
 def decode_position_info(buf):
@@ -186,6 +202,7 @@ file_coders = {
     FileInfoClass.INTERNAL_INFORMATION: (encode_internal_info, decode_internal_info),
     FileInfoClass.EA_INFORMATION: (encode_ea_info, decode_ea_info),
     FileInfoClass.ACCESS_INFORMATION: (encode_access_info, decode_access_info),
+    FileInfoClass.RENAME_INFORMATION: (encode_rename_info, decode_rename_info),
     FileInfoClass.POSITION_INFORMATION: (encode_position_info, decode_position_info),
     FileInfoClass.MODE_INFORMATION: (encode_mode_info, decode_mode_info),
     FileInfoClass.ALIGNMENT_INFORMATION: (encode_alignment_info, decode_alignment_info),
