@@ -31,6 +31,7 @@ from smb2.create import *
 from smb2.close import *
 from smb2.flush import *
 from smb2.read import *
+from smb2.write import *
 from smb2.set_info import *
 from smb2.query_info import *
 from smb2.query_directory import *
@@ -147,6 +148,31 @@ class Server(object):
                         }))
 
         
+    def srv_write(self, hdr, pdu):
+        #
+        # Write
+        #
+        if not hdr['tree_id'] in self.trees:
+            self._compound_error = Status.INVALID_PARAMETER
+            return (self._compound_error,
+                    ErrorResponse.encode({'error_data' : bytes(1)}))
+        _fid = pdu['file_id']
+        if _fid == (0xffffffffffffffff, 0xffffffffffffffff):
+            _fid = self._last_fid
+
+        try:
+            _f = self.files[_fid]
+        except KeyError:
+            self._compound_error = Status.INVALID_PARAMETER
+            return (self._compound_error,
+                    ErrorResponse.encode({'error_data' : bytes(1)}))
+
+        _len = os.pwrite(_f.fd, pdu['data'], pdu['offset'])
+        return (Status.SUCCESS,
+                Write.encode(Direction.REPLY,
+                             {'count': _len,
+                              }))
+
     def srv_close(self, hdr, pdu):
         #
         # Close
@@ -472,6 +498,8 @@ class Server(object):
         t = self.trees[hdr['tree_id']]
 
         flags = 0
+        if hasattr(os, 'O_BINARY'): # Windows needs O_BINARY
+            flags |= os.O_BINARY
         _r = False
         _w = False
         if pdu['desired_access'] & (FILE_GENERIC_WRITE | FILE_GENERIC_ALL | FILE_WRITE_ATTRIBUTES | FILE_WRITE_EA | FILE_WRITE_DATA):
@@ -489,6 +517,8 @@ class Server(object):
             True
         elif Disposition(pdu['create_disposition']) == Disposition.OPEN_IF:
             flags = flags | os.O_CREAT
+        elif Disposition(pdu['create_disposition']) == Disposition.OVERWRITE:
+            flags = flags | os.O_TRUNC
         else:
             print('Create disposition', pdu['create_disposition'], 'not yet supported')
             self._compound_error = Status.INVALID_PARAMETER
@@ -724,6 +754,7 @@ class Server(object):
                 Command.CLOSE: (Close, self.srv_close),
                 Command.FLUSH: (Flush, self.srv_flush),
                 Command.READ: (Read, self.srv_read),
+                Command.WRITE: (Write, self.srv_write),
                 Command.QUERY_INFO: (QueryInfo, self.srv_query_info),
                 Command.QUERY_DIRECTORY: (QueryDirectory, self.srv_query_dir),
                 Command.SET_INFO: (SetInfo, self.srv_set_info),

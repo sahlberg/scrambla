@@ -37,6 +37,7 @@ class Command(Enum):
     CLOSE              = 6
     FLUSH              = 7
     READ               = 8
+    WRITE              = 9
     QUERY_DIRECTORY    = 14
     QUERY_INFO         = 16
     SET_INFO           = 17
