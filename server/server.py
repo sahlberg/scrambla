@@ -521,6 +521,8 @@ class Server(object):
 
         if Disposition(pdu['create_disposition']) == Disposition.OPEN:
             True
+        elif Disposition(pdu['create_disposition']) == Disposition.CREATE:
+            flags = flags | os.O_CREAT | os.O_EXCL
         elif Disposition(pdu['create_disposition']) == Disposition.OPEN_IF:
             flags = flags | os.O_CREAT
         elif Disposition(pdu['create_disposition']) == Disposition.OVERWRITE:
@@ -530,6 +532,12 @@ class Server(object):
             self._compound_error = Status.INVALID_PARAMETER
             return (self._compound_error,
                     ErrorResponse.encode({'error_data' : bytes(1)}))
+
+        if pdu['create_options'] & FILE_DIRECTORY_FILE:
+            flags = flags | os.O_DIRECTORY
+            if flags & os.O_CREAT:
+                os.mkdir(pdu['path'].decode(), dir_fd=t[0])
+                flags = os.O_RDONLY
 
         try:
             f = File(pdu['path'].decode(), flags, t[0])
