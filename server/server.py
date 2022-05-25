@@ -29,6 +29,7 @@ from smb2.tree_connect import *
 from smb2.tree_disconnect import *
 from smb2.create import *
 from smb2.close import *
+from smb2.flush import *
 from smb2.read import *
 from smb2.query_info import *
 from smb2.query_directory import *
@@ -50,7 +51,7 @@ class File(object):
             self.scandir()
 
     def __del__(self):
-        if self.fd:
+        if hasattr(self, 'fd') and self.fd:
             os.close(self.fd)
             if self.delete_on_close:
                 os.unlink(self.path)
@@ -169,6 +170,30 @@ class Server(object):
                 Close.encode(Direction.REPLY,
                        {'flags': 0,
                         }))
+
+
+    def srv_flush(self, hdr, pdu):
+        #
+        # Flush
+        #
+        if not hdr['tree_id'] in self.trees:
+            self._compound_error = Status.INVALID_PARAMETER
+            return (self._compound_error,
+                    ErrorResponse.encode({'error_data' : bytes(1)}))
+        _fid = pdu['file_id']
+        if _fid == (0xffffffffffffffff, 0xffffffffffffffff):
+            _fid = self._last_fid
+
+        try:
+            _f = self.files[_fid]
+        except KeyError:
+            self._compound_error = Status.INVALID_PARAMETER
+            return (self._compound_error,
+                    ErrorResponse.encode({'error_data' : bytes(1)}))
+        os.fsync(_f.fd)
+        return (Status.SUCCESS,
+                Flush.encode(Direction.REPLY,
+                       {}))
 
 
     def srv_query_dir(self, hdr, pdu):
@@ -374,13 +399,28 @@ class Server(object):
         t = self.trees[hdr['tree_id']]
 
         flags = 0
-        if Disposition(pdu['create_disposition']) != Disposition.OPEN:
+        _r = False
+        _w = False
+        if pdu['desired_access'] & (FILE_GENERIC_WRITE | FILE_GENERIC_ALL | FILE_WRITE_ATTRIBUTES | FILE_WRITE_EA | FILE_WRITE_DATA):
+            _w = True
+        if pdu['desired_access'] & (FILE_GENERIC_READ | FILE_GENERIC_ALL | FILE_READ_ATTRIBUTES | FILE_READ_EA | FILE_READ_DATA):
+            _r = True
+        if _r and not _w:
+            flags = flags | os.O_RDONLY
+        if _r and _w:
+            flags = flags | os.O_RDWR
+        if not _r and _w:
+            flags = flags | os.O_WRONLY
+
+        if Disposition(pdu['create_disposition']) == Disposition.OPEN:
+            True
+        elif Disposition(pdu['create_disposition']) == Disposition.OPEN_IF:
+            flags = flags | os.O_CREAT
+        else:
+            print('Create disposition', pdu['create_disposition'], 'not yet supported')
             self._compound_error = Status.INVALID_PARAMETER
             return (self._compound_error,
                     ErrorResponse.encode({'error_data' : bytes(1)}))
-        if pdu['desired_access'] & (FILE_GENERIC_READ | FILE_GENERIC_ALL | FILE_READ_ATTRIBUTES | FILE_READ_EA | FILE_READ_DATA):
-            # O_RDONLY is 0
-            flags = flags | os.O_RDONLY
 
         try:
             f = File(pdu['path'].decode(), flags, t[0])
@@ -609,6 +649,7 @@ class Server(object):
                 Command.TREE_DISCONNECT: (TreeDisconnect, self.srv_tree_disconn),
                 Command.CREATE: (Create, self.srv_create),
                 Command.CLOSE: (Close, self.srv_close),
+                Command.FLUSH: (Flush, self.srv_flush),
                 Command.READ: (Read, self.srv_read),
                 Command.QUERY_INFO: (QueryInfo, self.srv_query_info),
                 Command.QUERY_DIRECTORY: (QueryDirectory, self.srv_query_dir),

@@ -35,6 +35,7 @@ class Command(Enum):
     TREE_DISCONNECT    = 4
     CREATE             = 5
     CLOSE              = 6
+    FLUSH              = 7
     READ               = 8
     QUERY_DIRECTORY    = 14
     QUERY_INFO         = 16
