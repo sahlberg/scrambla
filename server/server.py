@@ -45,6 +45,7 @@ class File(object):
 
     def __init__(self, path, flags, at, **kwargs):
         self.path = '.' if not path else path
+        self.flags = flags
         self.fd = os.open(self.path, flags, dir_fd=at)
         _st = os.stat(self.fd)
         self.de = []
@@ -55,8 +56,6 @@ class File(object):
     def __del__(self):
         if hasattr(self, 'fd') and self.fd:
             os.close(self.fd)
-            if self.delete_on_close:
-                os.unlink(self.path)
     
     def stat(self):
         return os.fstat(self.fd)
@@ -181,6 +180,8 @@ class Server(object):
             self._compound_error = Status.INVALID_PARAMETER
             return (self._compound_error,
                     ErrorResponse.encode({'error_data' : bytes(1)}))
+        t = self.trees[hdr['tree_id']]
+
         _fid = pdu['file_id']
         if _fid == (0xffffffffffffffff, 0xffffffffffffffff):
             _fid = self._last_fid
@@ -191,6 +192,19 @@ class Server(object):
             self._compound_error = Status.INVALID_PARAMETER
             return (self._compound_error,
                     ErrorResponse.encode({'error_data' : bytes(1)}))
+        if _f.delete_on_close:
+            if _f.flags & os.O_DIRECTORY:
+                try:
+                    os.rmdir(_f.path, dir_fd=t[0])
+                except OSError:
+                    del self.files[_fid]
+                    del _f
+                    return (Status.DIRECTORY_NOT_EMPTY,
+                            Close.encode(Direction.REPLY,
+                                         {'flags': 0,
+                                          }))
+            else:
+                os.unlink(_f.path, dir_fd=t[0])
         del self.files[_fid]
         del _f
         return (Status.SUCCESS,
@@ -442,6 +456,11 @@ class Server(object):
         buffer = FileInfo.decode(FileInfoClass(c), pdu['buffer'])
         if FileInfoClass(c) == FileInfoClass.END_OF_FILE_INFORMATION:
             os.truncate(f.fd, buffer['end_of_file'])
+            return (Status.SUCCESS,
+                    SetInfo.encode(Direction.REPLY,
+                                     {}))
+        if FileInfoClass(c) == FileInfoClass.DISPOSITION_INFORMATION:
+            f.delete_on_close = buffer['delete_pending']
             return (Status.SUCCESS,
                     SetInfo.encode(Direction.REPLY,
                                      {}))

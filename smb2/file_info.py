@@ -25,6 +25,7 @@ class FileInfoClass(Enum):
     ACCESS_INFORMATION            = 0x08
     NAME_INFORMATION              = 0x09
     RENAME_INFORMATION            = 0x0a
+    DISPOSITION_INFORMATION       = 0x0d
     POSITION_INFORMATION          = 0x0e
     MODE_INFORMATION              = 0x10
     ALIGNMENT_INFORMATION         = 0x11
@@ -184,6 +185,17 @@ def encode_all_info(info):
     buf = buf + encode_name_info(info)
     return buf
 
+def decode_disposition_info(buf):
+    info = {}
+    info.update({'delete_pending': struct.unpack_from('<B', buf, 0)[0]})
+    
+    return info
+
+def encode_disposition_info(info):
+    buf = bytearray(8)
+    struct.pack_into('<B', buf, 0, info['delete_pending'])
+    return buf
+
 def decode_end_of_file_info(buf):
     info = {}
     info.update({'end_of_file': struct.unpack_from('<Q', buf, 0)[0]})
@@ -208,6 +220,7 @@ file_coders = {
     FileInfoClass.ALIGNMENT_INFORMATION: (encode_alignment_info, decode_alignment_info),
     FileInfoClass.NAME_INFORMATION: (encode_name_info, decode_name_info),
     FileInfoClass.ALL_INFORMATION: (encode_all_info, decode_all_info),
+    FileInfoClass.DISPOSITION_INFORMATION: (encode_disposition_info, decode_disposition_info),
     FileInfoClass.END_OF_FILE_INFORMATION: (encode_end_of_file_info, decode_end_of_file_info),
     }
 

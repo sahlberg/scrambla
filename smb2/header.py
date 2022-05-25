@@ -21,6 +21,7 @@ class Status(Enum):
     MORE_PROCESSING_REQUIRED = 0xc0000016
     OBJECT_NAME_NOT_FOUND    = 0xc0000034
     BAD_NETWORK_NAME         = 0xc00000cc
+    DIRECTORY_NOT_EMPTY      = 0xc0000101
     USER_SESSION_DELETED     = 0xc0000203
     
 class Direction(Enum):
