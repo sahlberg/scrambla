@@ -31,6 +31,7 @@ from smb2.create import *
 from smb2.close import *
 from smb2.flush import *
 from smb2.read import *
+from smb2.set_info import *
 from smb2.query_info import *
 from smb2.query_directory import *
 from smb2.file_info import *
@@ -251,6 +252,13 @@ class Server(object):
                         }))
 
     def _query_file_info(self, f, c):
+        try:
+            _ = FileInfoClass(c)
+        except:
+            print('FileInfoClass', c, 'not yet implemented')
+            return (Status.INVALID_PARAMETER,
+                    ErrorResponse.encode({'error_data' : bytes(1)}))
+
         _st = f.stat()
         _a = FILE_ATTRIBUTE_SPARSE_FILE
         if stat.S_ISDIR(_st.st_mode):
@@ -291,6 +299,13 @@ class Server(object):
                                  }))
 
     def _query_fs_info(self, t, c):
+        try:
+            _ = FSInfoClass(c)
+        except:
+            print('FSInfoClass', c, 'not yet implemented')
+            return (Status.INVALID_PARAMETER,
+                    ErrorResponse.encode({'error_data' : bytes(1)}))
+
         if FSInfoClass(c) == FSInfoClass.ATTRIBUTE:
             _fi = FSInfo.encode(FSInfoClass.ATTRIBUTE,
                     {'attributes': SUPPORTS_OBJECT_IDS | SUPPORTS_SPARSE_FILES | UNICODE_ON_DISK | CASE_PRESERVED_NAMES | CASE_SENSITIVE_SEARCH,
@@ -352,6 +367,7 @@ class Server(object):
                     {'buffer': _fi,
                      }))
 
+        print('QueryInfo: FSInfoClass', FSInfoClass(c), 'not yet implemented') 
         return (Status.INVALID_PARAMETER,
                 ErrorResponse.encode({'error_data' : bytes(1)}))
             
@@ -383,6 +399,63 @@ class Server(object):
             return self._query_fs_info(self.trees[hdr['tree_id']], pdu['file_info_class'])
         
         print('QueryInfo: Can not handle info type', pdu['info_type'])
+        self._compound_error = Status.INVALID_PARAMETER
+        return (self._compound_error,
+                ErrorResponse.encode({'error_data' : bytes(1)}))
+
+
+    def _set_file_info(self, t, pdu):
+        c = pdu['file_info_class']
+        try:
+            _ = FileInfoClass(c)
+        except:
+            print('FileInfoClass', c, 'not yet implemented')
+            return (Status.INVALID_PARAMETER,
+                    ErrorResponse.encode({'error_data' : bytes(1)}))
+
+        buffer = FileInfo.decode(FileInfoClass(c), pdu['buffer'])
+        if FileInfoClass(c) == FileInfoClass.END_OF_FILE_INFORMATION:
+            os.truncate(t.fd, buffer['end_of_file'])
+            return (Status.SUCCESS,
+                    SetInfo.encode(Direction.REPLY,
+                                     {}))
+        if FileInfoClass(c) == FileInfoClass.BASIC_INFORMATION:
+            a = (buffer['last_access_time'][0], buffer['last_write_time'][0])
+            if a[0] == 0:
+                a = (int(time.time()), a[1])
+            os.utime(t.fd, times=a)
+            return (Status.SUCCESS,
+                    SetInfo.encode(Direction.REPLY,
+                                     {}))
+
+        print('SetInfo: FileInfoClass', FileInfoClass(c), 'not yet implemented') 
+        return (Status.INVALID_PARAMETER,
+                ErrorResponse.encode({'error_data' : bytes(1)}))
+    
+    def srv_set_info(self, hdr, pdu):
+        #
+        # Set Info
+        #
+        if not hdr['tree_id'] in self.trees:
+            self._compound_error = Status.INVALID_PARAMETER
+            return (self._compound_error,
+                    ErrorResponse.encode({'error_data' : bytes(1)}))
+
+        _fid = pdu['file_id']
+        if _fid == (0xffffffffffffffff, 0xffffffffffffffff):
+            _fid = self._last_fid
+
+        try:
+            _f = self.files[_fid]
+        except KeyError:
+            self._compound_error = Status.INVALID_PARAMETER
+            return (self._compound_error,
+                    ErrorResponse.encode({'error_data' : bytes(1)}))
+
+        if pdu['info_type'] == SMB2_0_INFO_FILE:
+            return self._set_file_info(_f, pdu)
+        
+        print('SetInfo: Can not handle info type', pdu['info_type'])
         self._compound_error = Status.INVALID_PARAMETER
         return (self._compound_error,
                 ErrorResponse.encode({'error_data' : bytes(1)}))
@@ -653,6 +726,7 @@ class Server(object):
                 Command.READ: (Read, self.srv_read),
                 Command.QUERY_INFO: (QueryInfo, self.srv_query_info),
                 Command.QUERY_DIRECTORY: (QueryDirectory, self.srv_query_dir),
+                Command.SET_INFO: (SetInfo, self.srv_set_info),
                 }
 
             f = RESPONSE

@@ -39,6 +39,7 @@ class Command(Enum):
     READ               = 8
     QUERY_DIRECTORY    = 14
     QUERY_INFO         = 16
+    SET_INFO           = 17
 
 
 # Flags

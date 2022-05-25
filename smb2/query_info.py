@@ -83,7 +83,7 @@ class QueryInfo(object):
 
         if 'buffer' in hdr:
             struct.pack_into('<H', result, 8, 40 + 64)
-            struct.pack_into('<I', result, 8, len(buffer))
+            struct.pack_into('<I', result, 12, len(buffer))
             result = result + buffer
         
         return result

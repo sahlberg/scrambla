@@ -28,6 +28,7 @@ class FileInfoClass(Enum):
     MODE_INFORMATION              = 0x10
     ALIGNMENT_INFORMATION         = 0x11
     ALL_INFORMATION               = 0x12
+    END_OF_FILE_INFORMATION       = 0x14
 
 def decode_basic_info(buf):
     info = {}
@@ -167,6 +168,18 @@ def encode_all_info(info):
     buf = buf + encode_name_info(info)
     return buf
 
+def decode_end_of_file_info(buf):
+    info = {}
+    info.update({'end_of_file': struct.unpack_from('<Q', buf, 0)[0]})
+    
+    return info
+
+def encode_end_of_file_info(info):
+    buf = bytearray(8)
+    struct.pack_into('<Q', buf, 0, info['end_of_file'])
+    return buf
+
+
 file_coders = {
     FileInfoClass.BASIC_INFORMATION: (encode_basic_info, decode_basic_info),
     FileInfoClass.STANDARD_INFORMATION: (encode_standard_info, decode_standard_info),
@@ -178,6 +191,7 @@ file_coders = {
     FileInfoClass.ALIGNMENT_INFORMATION: (encode_alignment_info, decode_alignment_info),
     FileInfoClass.NAME_INFORMATION: (encode_name_info, decode_name_info),
     FileInfoClass.ALL_INFORMATION: (encode_all_info, decode_all_info),
+    FileInfoClass.END_OF_FILE_INFORMATION: (encode_end_of_file_info, decode_end_of_file_info),
     }
 
 class FileInfo(object):
