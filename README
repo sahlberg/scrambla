@@ -7,17 +7,16 @@ It is limited in scope but is complete enough to be useful for error injection
 and testing clients.
 
 The biggest missing features at this point is
-* It does not fork a connection and only accests a single client connection.
-  Once the client disconnects the server will terminate.
+* It does not fork a connection and only accests a single client connection
+  at a time.
   
-* It is read-only
 * it does not verify the ntlmssp auth packet and simply allows everyone in as
   guest.
 * is does not track uids/gids of the client and all i/o will be performed as
   root.
 
-That said, it is complete enough to mount -o ro from a linux client,
-list directories, stat files and read files.
+That said, it is complete enough to mount from a linux client,
+list directories, stat files and work with files.
 
 Add more text once the server gains more features.
 
