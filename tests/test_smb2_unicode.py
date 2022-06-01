@@ -10,6 +10,8 @@ ucs2_buf_1 = bytes([
     0x61, 0x00, 0x72, 0x00, 0x65, 0x00
 ])
 
+utf8_buf_1 = bytes('/abc/def/', encoding='utf=8')
+
 def pr(buf):
     for i in buf:
         print("%02x " % i, end='')
@@ -28,6 +30,18 @@ def main():
         pr(ucs2)
         exit(1)
 
+    print('Decode and re-encode a UTF8 path #1')
+    ucs2 = UTF8toUCS2(utf8_buf_1).replace(b'/', b'\\')
+    utf8 = UCS2toUTF8(ucs2).replace(b'\\', b'/')
+
+    if utf8_buf_1 != utf8:
+        print('Re-encoded content mismatch')
+        print('Original:')
+        pr(utf8_buf_1)
+        print('Encoded:')
+        pr(utf8)
+        exit(1)
+        
 
 if __name__ == "__main__":
     main()

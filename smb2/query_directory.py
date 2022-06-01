@@ -44,7 +44,7 @@ class QueryDirectory(object):
         _offset = struct.unpack_from('<H', hdr, 24)[0] - 64
         _len = struct.unpack_from('<H', hdr, 26)[0]
         if _len:
-            result.update({'name': UCS2toUTF8(hdr[_offset:_offset + _len])})
+            result.update({'name': UCS2toUTF8(hdr[_offset:_offset + _len]).replace(b'\\', b'/')})
 
         return result
 
@@ -72,7 +72,7 @@ class QueryDirectory(object):
         struct.pack_into('<I', result, 28, hdr['output_buffer_length'])
 
         if 'name' in hdr:
-            _c = UTF8toUCS2(hdr['name'])
+            _c = UTF8toUCS2(hdr['name']).replace(b'/', b'\\')
             struct.pack_into('<H', result, 24, 32 + 64)
             struct.pack_into('<H', result, 26, len(_c))
             result = result + _c

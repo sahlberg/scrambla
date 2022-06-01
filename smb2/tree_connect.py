@@ -40,7 +40,7 @@ def _decode_request(hdr):
 
     _offset = struct.unpack_from('<H', hdr, 4)[0] - 64
     _len = struct.unpack_from('<H', hdr, 6)[0]
-    result.update({'path': UCS2toUTF8(hdr[_offset:_offset + _len])})
+    result.update({'path': UCS2toUTF8(hdr[_offset:_offset + _len]).replace(b'\\', b'/')})
     
     return result
 
@@ -53,7 +53,7 @@ def _encode_request(hdr):
     if 'flags' in hdr:
         struct.pack_into('<H', result, 2, hdr['flags'])
 
-    _u = UTF8toUCS2(hdr['path'])
+    _u = UTF8toUCS2(hdr['path']).replace(b'/', b'\\')
     struct.pack_into('<H', result, 4, 8 + 64)
     struct.pack_into('<H', result, 6, len(_u))
     result = result + _u + bytearray(2)

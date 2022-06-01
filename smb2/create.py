@@ -210,7 +210,7 @@ def _decode_request(hdr):
 
     _offset = struct.unpack_from('<H', hdr, 44)[0] - 64
     _len = struct.unpack_from('<H', hdr, 46)[0]
-    result.update({'path': UCS2toUTF8(hdr[_offset:_offset + _len])})
+    result.update({'path': UCS2toUTF8(hdr[_offset:_offset + _len]).replace(b'\\', b'/')})
 
     _offset = struct.unpack_from('<I', hdr, 48)[0] - 64
     _len = struct.unpack_from('<I', hdr, 52)[0]
@@ -234,7 +234,7 @@ def _encode_request(hdr):
     struct.pack_into('<I', result, 36, hdr['create_disposition'])
     struct.pack_into('<I', result, 40, hdr['create_options'])
 
-    _path = UTF8toUCS2(hdr['path'])
+    _path = UTF8toUCS2(hdr['path'].replace(b'/', b'\\'))
     struct.pack_into('<H', result, 44, 56 + 64)
     if len(_path):
         struct.pack_into('<H', result, 46, len(_path))

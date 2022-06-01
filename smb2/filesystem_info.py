@@ -85,7 +85,7 @@ def decode_attribute_info(buf):
     i.update({'maximum_component_name_length': struct.unpack_from('<I', buf, 4)[0]})
     _len = struct.unpack_from('<I', buf, 8)[0]
     if _len:
-        i.update({'file_system_name': UCS2toUTF8(buf[12:12 + _len])})
+        i.update({'file_system_name': UCS2toUTF8(buf[12:12 + _len]).replace(b'\\', b'/')})
 
     return i
 
@@ -93,7 +93,7 @@ def encode_attribute_info(i):
     _b = bytearray(12)
     struct.pack_into('<I', _b,  0, i['attributes'])
     struct.pack_into('<I', _b,  4, i['maximum_component_name_length'])
-    _n = UTF8toUCS2(i['file_system_name'])
+    _n = UTF8toUCS2(i['file_system_name']).replace(b'/', b'\\')
     struct.pack_into('<I', _b, 8, len(_n))
     _b = _b + _n
 
@@ -119,7 +119,7 @@ def decode_volume_info(buf):
     i.update({'serial_number': struct.unpack_from('<I', buf, 8)[0]})
     i.update({'supports_objects': struct.unpack_from('<B', buf, 16)[0]})
     _len = struct.unpack_from('<I', buf, 12)[0]
-    i.update({'label': UCS2toUTF8(buf[18:18 + _len])})
+    i.update({'label': UCS2toUTF8(buf[18:18 + _len]).replace(b'\\', b'/')})
 
     return i
 
@@ -128,7 +128,7 @@ def encode_volume_info(i):
     struct.pack_into('<Q', _b,  0, TimevalToWin(i['creation_time']))
     struct.pack_into('<I', _b,  8, i['serial_number'])
     struct.pack_into('<B', _b,  16, i['supports_objects'])
-    _lab = UTF8toUCS2(i['label'])
+    _lab = UTF8toUCS2(i['label']).replace(b'/', b'\\')
     struct.pack_into('<I', _b,  12, len(_lab))
     _b = _b + _lab
     

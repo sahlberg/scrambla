@@ -103,13 +103,13 @@ def decode_rename_info(buf):
     info = {}
     info.update({'replace_if_exists': struct.unpack_from('<B', buf, 0)[0]})
     _len = struct.unpack_from('<I', buf, 16)[0]
-    info.update({'filename': UCS2toUTF8(buf[20:20 + _len])})
+    info.update({'filename': UCS2toUTF8(buf[20:20 + _len]).replace(b'\\', b'/')})
     return info
 
 def encode_rename_info(info):
     buf = bytearray(20)
     struct.pack_into('<B', buf, 0, info['replace_if_exists'])
-    _fn = UTF8toUCS2(info['filename'])
+    _fn = UTF8toUCS2(info['filename']).replace(b'/', b'\\')
     struct.pack_into('<I', buf, 16, len(_fn))
     buf = buf + _fn
     return buf
@@ -148,13 +148,13 @@ def decode_name_info(buf):
     info = {}
     _len = struct.unpack_from('<I', buf, 0)[0]
     if _len:
-        info.update({'name': UCS2toUTF8(buf[4:4 + _len])})
+        info.update({'name': UCS2toUTF8(buf[4:4 + _len]).replace(b'\\', b'/')})
     return info
 
 def encode_name_info(info):
     buf = bytearray(4)
     if 'name' in info:
-        _c = UTF8toUCS2(hdr['name'])
+        _c = UTF8toUCS2(hdr['name']).replace(b'/', b'\\')
         struct.pack_into('<I', buf, 0, len(_c))
         buf = buf + _c
     return buf

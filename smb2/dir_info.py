@@ -31,7 +31,7 @@ def encode_file_id_full_dir_info(i):
     struct.pack_into('<I', _b, 64, i['ea_size'])
     struct.pack_into('<Q', _b, 72, i['file_id'])
 
-    _fn = UTF8toUCS2(i['file_name'])
+    _fn = UTF8toUCS2(i['file_name']).replace(b'/', b'\\')
     struct.pack_into('<I', _b, 60, len(_fn))
     _b = _b + _fn
 
@@ -56,7 +56,7 @@ def decode_file_id_full_dir_info(buf):
     i.update({'file_id': struct.unpack_from('<Q', buf, 72)[0]})
 
     _fnl = struct.unpack_from('<I', buf, 60)[0]
-    i.update({'file_name': UCS2toUTF8(buf[80:80 + _fnl])})
+    i.update({'file_name': UCS2toUTF8(buf[80:80 + _fnl]).replace(b'\\', b'/')})
 
     return i
 
