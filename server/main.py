@@ -2,6 +2,7 @@
 # coding: utf-8
 
 import socket
+import traceback
 
 from smb2.header import Direction
 from server import Server
@@ -27,6 +28,7 @@ def main():
                     Server(conn)
                 except Exception as e:
                     print(e)
+                    traceback.print_exc()
                     True
             
 if __name__ == "__main__":
