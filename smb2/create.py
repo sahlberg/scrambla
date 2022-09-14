@@ -352,8 +352,9 @@ def _encode_contexts(contexts, ctx_list):
         # assume we have another context after this so set next accordingly
         struct.pack_into('<I', buf, _pos, len(buf) - _pos)
 
-    # Except next should be 0 for the last context
-    struct.pack_into('<I', buf, _pos, 0)
+    # Except next should be 0 for the last context, IF we have contexts
+    if len(buf) >= 16:
+        struct.pack_into('<I', buf, _pos, 0)
 
     return buf
 
