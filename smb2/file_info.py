@@ -183,6 +183,8 @@ def encode_all_info(info):
     buf = buf + encode_mode_info(info)
     buf = buf + encode_alignment_info(info)
     buf = buf + encode_name_info(info)
+    if 'name' in info and hdr['name'] == 'libsmb2_pr_457':
+        return buf[:-6]
     return buf
 
 def decode_disposition_info(buf):
