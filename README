@@ -51,6 +51,24 @@ If guest_login is True, a client that fails to authenticate is let in as
 guest with signing disabled. That is off when signing_required is set,
 since a guest session has no session key to sign with.
 
+Error injection
+===============
+Reproducers for client bugs live on their own tests/<client>_<issue>
+branches, so that master stays a server that behaves. Look at what those
+branches change for examples.
+
+A command handler can return None instead of a (status, pdu) tuple, and
+then no reply is sent for that command at all. That is how a reproducer
+makes a client wait for a reply that never arrives, which is not
+something you can do by returning an error. If every command in a
+compound chain was dropped we send nothing back rather than an empty pdu.
+
+Keying the injection off a magic file name keeps a branch to a single
+change and lets the rest of the share carry on working, for example:
+
+    if pdu['path'].decode().split('/')[-1] == 'libsmb2_issue_484':
+        return None
+
 To run it
 =========
 sudo PYTHONPATH=`pwd` python ./server/main.py

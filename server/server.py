@@ -983,6 +983,15 @@ class Server(object):
 
             rep = c[1](h, req)
 
+            #
+            # A command handler that returns None wants this command
+            # dropped without any reply at all. Nothing does that during
+            # normal operation, it is there for the reproducers that need
+            # a client to sit and wait for a reply that never arrives.
+            #
+            if rep is None:
+                continue
+
             if h['command'] == Command.SESSION_SETUP.value and self._use_signing and rep[0].value == 0:
                 f = f | SIGNED
 
@@ -1048,6 +1057,13 @@ class Server(object):
             # Process the commands
             #
             rep = self.ProcessCommands(cmds)
+
+            #
+            # Every command in this chain was dropped, so there is nothing
+            # to reply with. Do not send an empty pdu back.
+            #
+            if not rep:
+                continue
 
             #
             # Concatenate them into a single bytearray, take care of padding
