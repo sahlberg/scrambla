@@ -10,8 +10,6 @@ The biggest missing features at this point is
 * It does not fork a connection and only accests a single client connection
   at a time.
   
-* it does not verify the ntlmssp auth packet and simply allows everyone in as
-  guest.
 * is does not track uids/gids of the client and all i/o will be performed as
   root.
 
@@ -27,9 +25,31 @@ See server/config.py.example for an example configuration file.
 
 Authentication
 ==============
-Authentication requires that you have the pyspnego pip package installed:
-sudo pip install pyspnego
-You also need to setup a NTLM_USER_FILE and point to it from the config.
+NTLMSSP is implemented in smb2/ntlmssp.py and SPNEGO in smb2/spnego.py, so
+there is nothing to install. Clients may send their NTLMSSP tokens either
+raw or wrapped in SPNEGO, both work.
+
+You need to set up a NTLM_USER_FILE and point to it from the config with
+ntlm_user_file. It holds one entry per line:
+
+  domain:user:password
+
+The domain matters. We advertise Config.server_name as the NTLM target
+name, so a client that was not told a domain of its own will send that
+name back to us and hash the password with it, and the entry has to match.
+With the default server_name of SMBD that means:
+
+  SMBD:myuser:mypassword
+
+Getting this wrong does not look like a password problem: the client ends
+up with no credentials at all and sends an anonymous authentication, which
+we reject. Set guest_login to False in the config while you sort out a
+login, otherwise a failed authentication quietly turns into a guest
+session.
+
+If guest_login is True, a client that fails to authenticate is let in as
+guest with signing disabled. That is off when signing_required is set,
+since a guest session has no session key to sign with.
 
 To run it
 =========

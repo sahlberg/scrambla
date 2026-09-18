@@ -1,30 +1,36 @@
 #!/usr/bin/env python
 # coding: utf-8
 
-from Crypto.Hash import CMAC
-from Crypto.Cipher import AES
+#
+# pycryptodome installs as Cryptodome when the ancient pycrypto owns the
+# Crypto name, so look for it there first.
+#
+try:
+    from Cryptodome.Hash import CMAC
+    from Cryptodome.Cipher import AES
+except ImportError:
+    from Crypto.Hash import CMAC
+    from Crypto.Cipher import AES
 import hashlib
 import hmac
 import os
 import secrets
-import socket
 import stat
 import struct
 import time
-import spnego
 try:
     from config import Config
 except:
     print('FATAL: No configuration file found.')
     raise
-if Config.ntlm_user_file:
-    os.environ['NTLM_USER_FILE'] = Config.ntlm_user_file 
 
 from smb2.header import *
 from smb2.error_response import *
 from smb2.negotiate_protocol import *
 from smb2.session_setup import *
 from smb2.session_logoff import *
+from smb2 import ntlmssp
+from smb2 import spnego
 from smb2.tree_connect import *
 from smb2.tree_disconnect import *
 from smb2.create import *
@@ -99,7 +105,9 @@ class Server(object):
     
     def __init__(self, s, **kwargs):
         self._s = s
-        self._sp = spnego.server(socket.gethostname())
+        self._ntlm_negotiate = None
+        self._ntlm_challenge = None
+        self._ntlm_server_challenge = None
         self._guest = False
         self._sesid = 1
         self._treeid = 1
@@ -668,49 +676,178 @@ class Server(object):
                     self.preauth_hash,
                     )[:SMB2_KEY_SIZE]
 
-    def srv_sess_setup(self, hdr, pdu):
-        try:
-            sm = self._sp.step(pdu['security_buffer'])
-        except Exception as e:
-            if Config.guest_login:
-                if Config.signing_required:
-                    print('Authentication failed. Guest login unavailable when signing is required')
-                    raise e
-                print('Authentication failed. Logging in as guest')
-                self._use_signing = False
-                self._guest = True
-                hdr['session_id'] = self._sesid
-                self.sessions.update({self._sesid: (None,)})
-                self._sesid = self._sesid + 1
-                return (Status.SUCCESS,
-                        SessionSetup.encode(Direction.REPLY,
-                                {'session_flags': SMB2_SESSION_FLAG_IS_GUEST,
-                                 }))
-            else:
-                print('Exception', e)
-                raise
+    def ntlm_password(self, domain, user):
+        """
+        Look up the password for domain\\user in the NTLM_USER_FILE. The
+        file has one 'domain:user:password' entry per line. We match the
+        domain the client sent us, which is the target name we put in the
+        CHALLENGE, so an entry for Config.server_name is what a client
+        that has not been told a domain will end up asking for.
+        """
+        if not Config.ntlm_user_file:
+            print('No ntlm_user_file configured, can not authenticate')
+            return None
 
-        if self._sp.complete:
-            # self._sp.session_key
-            # self._sp.negotiated_protocol == 'ntlm'
-            print('Authenticated as', self._sp.client_principal)
-            self.generate_keys(self._sp.session_key)
-            #
-            # TODO store user/session data in this tuple
-            hdr['session_id'] = self._sesid
-            self.sessions.update({self._sesid: (None,)})
-            self._sesid = self._sesid + 1
-        
-            return (Status.SUCCESS,
-                    SessionSetup.encode(Direction.REPLY,
-                        {'session_flags': 0,
-                         }))
-            
-        return (Status.MORE_PROCESSING_REQUIRED,
+        try:
+            with open(Config.ntlm_user_file, 'r') as f:
+                for line in f:
+                    line = line.strip()
+                    if line.count(':') != 2:
+                        continue
+                    _domain, _user, _password = line.split(':')
+                    if _user.upper() != user.upper():
+                        continue
+                    if domain and _domain.upper() != domain.upper():
+                        continue
+                    return _password
+        except OSError as e:
+            print('Can not read', Config.ntlm_user_file, e)
+            return None
+
+        print('No entry for', domain + '\\' + user, 'in', Config.ntlm_user_file)
+        return None
+
+    def ntlmssp_negotiate(self, msg):
+        """
+        Answer a NTLMSSP NEGOTIATE with a CHALLENGE.
+
+        The names we put in here are not cosmetic. The client copies the
+        target info into its response and the target name becomes the
+        domain it hashes the password with, so they have to be the names
+        we expect to find in the NTLM_USER_FILE.
+        """
+        flags = msg['negotiate_flags'] & (
+                ntlmssp.NTLMSSP_NEGOTIATE_SIGN |
+                ntlmssp.NTLMSSP_NEGOTIATE_SEAL |
+                ntlmssp.NTLMSSP_NEGOTIATE_KEY_EXCH |
+                ntlmssp.NTLMSSP_NEGOTIATE_128 |
+                ntlmssp.NTLMSSP_NEGOTIATE_56 |
+                ntlmssp.NTLMSSP_NEGOTIATE_EXTENDED_SESSIONSECURITY)
+        #
+        # We only do unicode strings, and we always send a target info
+        # since that is what a NTLMv2 client needs.
+        #
+        flags = flags | (ntlmssp.NTLMSSP_NEGOTIATE_UNICODE |
+                         ntlmssp.NTLMSSP_REQUEST_TARGET |
+                         ntlmssp.NTLMSSP_NEGOTIATE_NTLM |
+                         ntlmssp.NTLMSSP_NEGOTIATE_ALWAYS_SIGN |
+                         ntlmssp.NTLMSSP_NEGOTIATE_TARGET_INFO |
+                         ntlmssp.NTLMSSP_TARGET_TYPE_SERVER)
+
+        self._ntlm_server_challenge = secrets.token_bytes(8)
+        self._ntlm_challenge = ntlmssp.encode_challenge({
+                'negotiate_flags': flags,
+                'server_challenge': self._ntlm_server_challenge,
+                'target_name': Config.server_name,
+                'target_info': ntlmssp.make_target_info(Config.server_name,
+                                                        Config.domain_name),
+                })
+        return self._ntlm_challenge
+
+    def ntlmssp_authenticate(self, auth, blob):
+        """
+        Verify a NTLMSSP AUTHENTICATE and return the session key.
+        Raises if the client does not check out.
+        """
+        if self._ntlm_challenge is None:
+            raise ValueError('AUTHENTICATE without a CHALLENGE')
+
+        if not auth['user'] or not auth['nt_challenge_response']:
+            raise ValueError('Anonymous authentication is not supported')
+
+        password = self.ntlm_password(auth['domain'], auth['user'])
+        if password is None:
+            raise ValueError('No password for ' + auth['domain'] + '\\' +
+                             auth['user'])
+
+        session_base_key = ntlmssp.verify_ntlmv2(password, auth,
+                                                 self._ntlm_server_challenge)
+        if session_base_key is None:
+            raise ValueError('Bad password for ' + auth['domain'] + '\\' +
+                             auth['user'])
+
+        session_key = ntlmssp.exported_session_key(session_base_key, auth)
+
+        #
+        # If the client computed a MIC then it covers all three messages
+        # and proves that nobody downgraded the flags on the way here.
+        #
+        if ntlmssp.has_mic(auth):
+            mic = ntlmssp.compute_mic(session_key, self._ntlm_negotiate,
+                                      self._ntlm_challenge, blob)
+            if not hmac.compare_digest(mic, auth['mic']):
+                raise ValueError('Bad MIC in AUTHENTICATE')
+
+        print('Authenticated as', auth['domain'] + '\\' + auth['user'])
+        return session_key
+
+    def authentication_failed(self, hdr, e):
+        if not Config.guest_login:
+            print('Authentication failed:', e)
+            return (Status.LOGON_FAILURE,
+                    ErrorResponse.encode({'error_data' : bytes(1)}))
+        if Config.signing_required:
+            print('Authentication failed, and guest login is unavailable '
+                  'when signing is required:', e)
+            return (Status.LOGON_FAILURE,
+                    ErrorResponse.encode({'error_data' : bytes(1)}))
+
+        print('Authentication failed, logging in as guest:', e)
+        self._use_signing = False
+        self._guest = True
+        hdr['session_id'] = self._sesid
+        self.sessions.update({self._sesid: (None,)})
+        self._sesid = self._sesid + 1
+        return (Status.SUCCESS,
                 SessionSetup.encode(Direction.REPLY,
-                                    {'session_flags': 0,
-                                     'security_buffer': sm,
-                                     }))
+                        {'session_flags': SMB2_SESSION_FLAG_IS_GUEST,
+                         }))
+
+    def srv_sess_setup(self, hdr, pdu):
+        #
+        # The token is either a raw NTLMSSP message or one wrapped in
+        # SPNEGO, depending on what the client made of the blob we sent
+        # in the negotiate reply. Reply in whichever form we were asked.
+        #
+        try:
+            token = spnego.decode(pdu['security_buffer'])
+            msg = ntlmssp.decode(token['mech_token'])
+        except Exception as e:
+            return self.authentication_failed(hdr, e)
+
+        if msg['message_type'] == ntlmssp.NEGOTIATE_MESSAGE:
+            self._ntlm_negotiate = token['mech_token']
+            challenge = self.ntlmssp_negotiate(msg)
+            if token['wrapped']:
+                challenge = spnego.encode_neg_token_resp(
+                        spnego.ACCEPT_INCOMPLETE, spnego.NTLMSSP_OID,
+                        challenge)
+
+            return (Status.MORE_PROCESSING_REQUIRED,
+                    SessionSetup.encode(Direction.REPLY,
+                                        {'session_flags': 0,
+                                         'security_buffer': challenge,
+                                         }))
+
+        try:
+            session_key = self.ntlmssp_authenticate(msg, token['mech_token'])
+        except Exception as e:
+            return self.authentication_failed(hdr, e)
+
+        self.generate_keys(session_key)
+        #
+        # TODO store user/session data in this tuple
+        hdr['session_id'] = self._sesid
+        self.sessions.update({self._sesid: (None,)})
+        self._sesid = self._sesid + 1
+
+        reply = {'session_flags': 0}
+        if token['wrapped']:
+            reply.update({'security_buffer':
+                    spnego.encode_neg_token_resp(spnego.ACCEPT_COMPLETE)})
+
+        return (Status.SUCCESS,
+                SessionSetup.encode(Direction.REPLY, reply))
         
     def srv_sess_logoff(self, hdr, pdu):
         del self.sessions[hdr['session_id']]
@@ -736,6 +873,11 @@ class Server(object):
             return (Status.INVALID_PARAMETER,
                     ErrorResponse.encode({'error_data' : bytes(1)}))
         self.dialect = VERSION_0302
+        #
+        # Tell the client that NTLMSSP is all we have. Without this a
+        # client that was built with kerberos will try kerberos against
+        # us and get nowhere.
+        #
         return (Status.SUCCESS,
                 NegotiateProtocol.encode(Direction.REPLY,
                        {'security_mode': SMB2_NEGOTIATE_SIGNING_ENABLED,
@@ -744,6 +886,8 @@ class Server(object):
                         'max_transact_size': 65536,
                         'max_read_size': 65536,
                         'max_write_size': 65536,
+                        'security_buffer': spnego.encode_neg_token_init(
+                                [spnego.NTLMSSP_OID]),
                         'system_time': (int(time.time()), 0, 0)}))
 
     def VerifySignature(self, hdr, cmd):
