@@ -524,6 +524,15 @@ class Server(object):
         #
         # Create/Open
         #
+        # Error injection for libsmb2 issue 484:
+        # Silently swallow the create for this name and never send any
+        # reply at all, so that the client is forced down its timeout
+        # path for a pdu that is still in flight.
+        #
+        if pdu['path'].decode().split('/')[-1] == 'libsmb2_issue_484':
+            print('Dropping CREATE for', pdu['path'].decode())
+            return None
+
         if not hdr['tree_id'] in self.trees:
             self._compound_error = Status.INVALID_PARAMETER
             return (self._compound_error,
